@@ -25,7 +25,9 @@ source-repository head
 
 library
   exposed-modules:
+      Interpreter
       Stream
+      Token
   other-modules:
       Paths_BrainFuck
   hs-source-dirs:

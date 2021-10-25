@@ -1,8 +1,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 
 module Stream
-    ( Stream(..)
-    , Generator(..)
+    ( Stream
     , Direction(..)
     , createStream
     , current
@@ -16,22 +15,19 @@ module Stream
 import           Control.Comonad                ( Comonad(..) )
 
 data Stream a = Bi (Stream a) a (Stream a)
-    deriving Functor
+
+instance Functor Stream where
+    fmap f (Bi l x r) = Bi (fmap f l) (f x) (fmap f r)
 
 instance Comonad Stream where
     extract (Bi _ a _) = a
     extend f (Bi l a r) = Bi (extend f l) (f (Bi l a r)) (extend f r)
 
-newtype Generator a = Generator { runGenerator :: a -> Direction -> (a, Generator a) }
-
 data Direction = LEFT | RIGHT
 
 -- | create a stream from an element and a generator function
-createStream :: a -> Generator a -> Stream a
-createStream x f = Bi l x r
-  where
-    r = setLeft (pushLeft x l) (uncurry createStream (runGenerator f x RIGHT))
-    l = setRight (pushRight x r) (uncurry createStream (runGenerator f x LEFT))
+createStream :: a -> (a -> Direction -> a) -> Stream a
+createStream x f = Bi (extend (flip f LEFT . extract) self) x (extend (flip f RIGHT . extract) self) where self = createStream x f
 
 -- | take current element from stream
 current :: Stream a -> a
@@ -39,7 +35,13 @@ current (Bi _ x _) = x
 
 -- | set current element of stream
 setCurrent :: a -> Stream a -> Stream a
-setCurrent x (Bi l _ r) = Bi l x r -- FIXME: this is not correct
+setCurrent x (Bi l _ r) = self where self = Bi (cngL (setRight self l)) x (cngR (setLeft self r))
+
+cngL :: Stream a -> Stream a
+cngL (Bi l' x' r') = self where self = Bi (cngL (setRight self l')) x' r'
+
+cngR :: Stream a -> Stream a
+cngR (Bi l' x' r') = self where self = Bi l' x' (cngR (setLeft self r'))
 
 -- | get right stream
 getRight :: Stream a -> Stream a
@@ -58,13 +60,35 @@ setLeft l (Bi _ x r) = Bi l x r
 -- | given a new element i, return l i (x<:r) where l is the left stream and r is the right stream
 -- and x is the original element
 pushRight :: a -> Stream a -> Stream a
-pushRight newX (Bi l x r) = Bi (setRight (pushRight newX r1) l) newX r1 where r1 = pushRight x r
+pushRight newX (Bi l x r) = self
+  where
+    self = Bi l1 newX r1
+    r1   = setLeft self (pushRight x r)
+    l1   = cngL (setRight self l)
 
 -- | given a new element i, return (l:>x) i r where l is the left stream and r is the right stream
 -- and x is the original element
 pushLeft :: a -> Stream a -> Stream a
-pushLeft newX (Bi l x r) = Bi l1 newX (setLeft (pushLeft newX l1) r) where l1 = pushLeft x l
+pushLeft newX (Bi l x r) = self
+  where
+    self = Bi l1 newX r1
+    l1   = setRight self (pushLeft x l)
+    r1   = cngR (setLeft self r)
 
+-- | augmenting int stream, i.e. ... -1 0 1 2 3 4 5 6 ...
+intStream :: Stream Int
+intStream = createStream
+    0
+    (\x d -> case d of
+        LEFT  -> x - 1
+        RIGHT -> x + 1
+    )
+
+-- | create a stream from a list, the first element is the current element
+-- and the rest are the elements in the right direction
+fromList :: [a] -> Stream (Maybe a)
+fromList [] = createStream Nothing (const (const Nothing))
+fromList xs = (\i -> if i < 0 || i >= length xs then Nothing else Just (xs !! i)) <$> intStream
 
 {-
 
