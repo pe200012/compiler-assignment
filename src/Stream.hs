@@ -7,6 +7,7 @@ module Stream
     , current
     , setCurrent
     , getRight
+    , fromList
     , getLeft
     , pushRight
     , pushLeft
